@@ -7,7 +7,8 @@ export default [
     {
         ignores: [
             "**/dist",
-            "**/out-tsc"
+            "**/out-tsc",
+            "apps/order-service/src/generated"
         ]
     },
     {
@@ -27,9 +28,15 @@ export default [
                     ],
                     depConstraints: [
                         {
-                            sourceTag: "*",
+                            sourceTag: "type:app",
                             onlyDependOnLibsWithTags: [
-                                "*"
+                                "type:lib"
+                            ]
+                        },
+                        {
+                            sourceTag: "type:lib",
+                            onlyDependOnLibsWithTags: [
+                                "type:lib"
                             ]
                         }
                     ]

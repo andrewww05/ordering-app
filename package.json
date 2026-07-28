@@ -3,9 +3,6 @@
   "version": "0.0.0",
   "private": true,
   "packageManager": "pnpm@10.14.0",
-  "pnpm": {
-    "onlyBuiltDependencies": ["prisma", "@prisma/engines"]
-  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@nestjs/schematics": "^11.1.0",

@@ -13,8 +13,13 @@
     "lib": ["es2020", "dom"],
     "skipLibCheck": true,
     "skipDefaultLibCheck": true,
-    "strict": false,
-    "paths": {}
+    "strict": true,
+    "strictPropertyInitialization": false,
+    "noImplicitOverride": true,
+    "forceConsistentCasingInFileNames": true,
+    "paths": {
+      "@ordering-app/contracts": ["./libs/contracts/src/index.ts"]
+    }
   },
   "exclude": ["node_modules", "tmp"]
 }
