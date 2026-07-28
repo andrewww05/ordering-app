@@ -1,9 +1,25 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { ClientsModule, Transport } from '@nestjs/microservices';
+import { ORDER_SERVICE_RABBITMQ, RABBITMQ_QUEUES } from '../constants';
 
 @Module({
-  imports: [],
+  imports: [
+    ClientsModule.register([
+      {
+        name: ORDER_SERVICE_RABBITMQ,
+        transport: Transport.RMQ,
+        options: {
+          urls: ["amqp://guest:guest@localhost:5672"],
+          queue: RABBITMQ_QUEUES.ORDER,
+          queueOptions: {
+            durable: true
+          }
+        }
+      }
+    ])
+  ],
   controllers: [AppController],
   providers: [AppService],
 })
