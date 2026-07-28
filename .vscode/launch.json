@@ -5,8 +5,8 @@
       "type": "node",
       "request": "launch",
       "name": "Debug api-gateway with Nx",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["nx", "serve", "api-gateway"],
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["exec", "nx", "serve", "api-gateway"],
       "env": {
         "NODE_OPTIONS": "--inspect=9229"
       },
@@ -34,6 +34,24 @@
       "sourceMaps": true,
       "outFiles": [
         "${workspaceFolder}/apps/order-service/dist/**/*.(m|c|)js",
+        "!**/node_modules/**"
+      ]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug notification-service with Nx",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["exec", "nx", "serve", "notification-service"],
+      "env": {
+        "NODE_OPTIONS": "--inspect=9231"
+      },
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": ["<node_internals>/**"],
+      "sourceMaps": true,
+      "outFiles": [
+        "${workspaceFolder}/apps/notification-service/dist/**/*.(m|c|)js",
         "!**/node_modules/**"
       ]
     }
