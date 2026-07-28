@@ -1,13 +1,10 @@
-import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app/app.module';
-import { RpcExceptionFilter } from './app/common/filters/rpc-exception.filter';
+import { DOCS_PATH, GLOBAL_PREFIX, configureApp } from './app/app.setup';
 import { EnvironmentVariables } from './app/config/env.validation';
-
-const GLOBAL_PREFIX = 'api';
-const DOCS_PATH = 'api/docs';
 
 async function bootstrap(): Promise<void> {
   const logger = new Logger('ApiGateway');
@@ -15,19 +12,7 @@ async function bootstrap(): Promise<void> {
   const config = app.get<ConfigService<EnvironmentVariables, true>>(ConfigService);
   const port: number = config.getOrThrow('API_GATEWAY_PORT', { infer: true });
 
-  app.setGlobalPrefix(GLOBAL_PREFIX);
-  app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
-  app.enableCors();
-
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    }),
-  );
-
-  app.useGlobalFilters(new RpcExceptionFilter());
+  configureApp(app);
   app.enableShutdownHooks();
 
   const document = SwaggerModule.createDocument(
