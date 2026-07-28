@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+dist
+tmp
+out-tsc
+coverage
+.nx
+.git
+.github
+.idea
+.vscode
+.env
+.env.local
+*.log
+apps/order-service/src/generated

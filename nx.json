@@ -1,6 +1,13 @@
 {
   "$schema": "./node_modules/nx/schemas/nx-schema.json",
   "analytics": false,
+  "targetDefaults": {
+    "test": {
+      "options": {
+        "passWithNoTests": true
+      }
+    }
+  },
   "plugins": [
     {
       "plugin": "@nx/webpack/plugin",

@@ -31,5 +31,105 @@ services:
       timeout: 5s
       retries: 10
 
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/order-service/Dockerfile
+      target: builder
+    command: ['pnpm', 'exec', 'prisma', 'migrate', 'deploy']
+    environment:
+      DATABASE_URL: postgresql://ordering:ordering@postgres:5432/ordering?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  order-service:
+    build:
+      context: .
+      dockerfile: apps/order-service/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://ordering:ordering@postgres:5432/ordering?schema=public
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      ORDER_QUEUE: order_queue
+      NOTIFICATIONS_QUEUE: notifications_queue
+      ORDER_SERVICE_PORT: 3001
+    ports:
+      - '3001:3001'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('http').get('http://127.0.0.1:3001/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: apps/notification-service/Dockerfile
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      NOTIFICATIONS_QUEUE: notifications_queue
+      NOTIFICATION_SERVICE_PORT: 3002
+    ports:
+      - '3002:3002'
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('http').get('http://127.0.0.1:3002/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: apps/api-gateway/Dockerfile
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      ORDER_QUEUE: order_queue
+      API_GATEWAY_PORT: 3000
+      RPC_TIMEOUT_MS: 5000
+    ports:
+      - '3000:3000'
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('http').get('http://127.0.0.1:3000/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
 volumes:
   postgres-data:
