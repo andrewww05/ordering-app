@@ -4,7 +4,9 @@ import {
   CreateOrderDto,
   FindOrdersQueryDto,
   ORDER_PATTERNS,
+  OrderHealthAck,
   OrderIdPayload,
+  OrderRemovedAck,
   OrderResponse,
   PaginatedOrdersResponse,
   UpdateOrderPayload,
@@ -36,12 +38,12 @@ export class OrdersController {
   }
 
   @MessagePattern(ORDER_PATTERNS.remove)
-  remove(@Payload() payload: OrderIdPayload): Promise<void> {
+  remove(@Payload() payload: OrderIdPayload): Promise<OrderRemovedAck> {
     return this.ordersService.remove(payload.id);
   }
 
   @MessagePattern(ORDER_PATTERNS.health)
-  health(): { status: string } {
+  health(): OrderHealthAck {
     return { status: 'ok' };
   }
 }

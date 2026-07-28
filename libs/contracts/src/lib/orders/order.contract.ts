@@ -52,6 +52,14 @@ export class PaginatedOrdersResponse {
   limit: number;
 }
 
+export interface OrderRemovedAck {
+  id: string;
+}
+
+export interface OrderHealthAck {
+  status: string;
+}
+
 export interface OrderCreatedEvent {
   orderId: string;
   customerId: string;

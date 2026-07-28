@@ -5,6 +5,7 @@ import {
   FindOrdersQueryDto,
   ORDER_EVENTS,
   OrderCreatedEvent,
+  OrderRemovedAck,
   OrderResponse,
   OrderStatus,
   PaginatedOrdersResponse,
@@ -130,7 +131,7 @@ export class OrdersService {
     return toOrderResponse(updated);
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string): Promise<OrderRemovedAck> {
     const existing = await this.prisma.order.findUnique({
       where: { id },
       select: { id: true, status: true },
@@ -150,6 +151,8 @@ export class OrdersService {
     }
 
     await this.prisma.order.delete({ where: { id } });
+
+    return { id };
   }
 
   private publishOrderCreated(
