@@ -6,20 +6,27 @@ request/response traffic and the domain events; Postgres is owned by a single se
 ## Architecture
 
 ```
-                HTTP :3000                    RPC over RMQ                     event over RMQ
-   client ──────────────────► api-gateway ──────────────────────► order-service ──────────────────────► notification-service
-                              (no domain      queue: order_queue   (owns Postgres)  queue: notifications_queue   (logs the delivery)
-                               logic)                                    │
-                                                                         ▼
-                                                                     Postgres
+                     HTTP :3000
+   client ─────────► api-gateway ──────┐
+                     (no domain logic) │
+                                       ├─ RPC over RMQ ─► order-service ─ event over RMQ ─► notification-service
+                     HTTP :3004        │  queue:            (owns Postgres)  queue:            (logs the delivery)
+   LLM agent ──────► mcp-server ───────┘  order_queue             │          notifications_queue
+                     (MCP tools)                                  ▼
+                                                              Postgres
 ```
 
 | Service | Port | Role |
 | --- | --- | --- |
-| `api-gateway` | 3000 | The only HTTP surface. Validates input, maps RPC failures to status codes, serves Swagger. Holds no business rules. |
+| `api-gateway` | 3000 | HTTP surface for humans and clients. Validates input, maps RPC failures to status codes, serves Swagger. Holds no business rules. |
 | `order-service` | 3001 | Owns the orders schema and is the only writer to Postgres. Consumes `order_queue`. |
 | `notification-service` | 3002 | Consumes `order.created` from `notifications_queue`. Knows nothing about HTTP or Postgres. |
-| `libs/contracts` | — | Message patterns, DTOs and response shapes shared by all three, so the wire format is checked at compile time. |
+| `mcp-server` | 3004 | HTTP surface for LLM agents. Exposes the same domain as MCP tools, guarded by a bearer token. Holds no business rules. |
+| `libs/contracts` | — | Message patterns, DTOs and response shapes shared by every app, so the wire format is checked at compile time. |
+
+`api-gateway` and `mcp-server` are two edges over the same core: both are thin, both speak RPC to
+`order-service` over `order_queue`, and neither owns a business rule. The gateway speaks REST to
+clients; the MCP server speaks JSON-RPC to agents.
 
 Two deliberately different interaction styles:
 
@@ -98,6 +105,63 @@ curl -s -o /dev/null -w '%{http_code}\n' -X DELETE localhost:3000/api/v1/orders/
 The last call returns `409` because the order is no longer `PENDING`. Watch the event arrive with
 `docker compose logs -f notification-service`.
 
+## MCP server
+
+`mcp-server` exposes the same domain to LLM agents over the Model Context Protocol. Endpoint is
+`POST http://localhost:3004/mcp` (streamable HTTP), health on `:3004/health`. Every request needs
+`Authorization: Bearer $MCP_AUTH_TOKEN`; without it the server answers `401` with a
+`WWW-Authenticate` challenge and tells the caller nothing else.
+
+| Tool | Writes | Annotations | RPC pattern |
+| --- | --- | --- | --- |
+| `list_orders` | no | read-only, idempotent | `orders.findAll` |
+| `get_order` | no | read-only, idempotent | `orders.findOne` |
+| `create_order` | yes | — | `orders.create` |
+| `update_order` | yes | idempotent | `orders.update` |
+| `delete_order` | yes | **destructive** | `orders.remove` |
+
+`MCP_ALLOW_WRITES=false` skips registration of the three write tools entirely, so an agent pointed at a
+read-only deployment never sees them rather than being told "no" at call time.
+
+Tool inputs are zod schemas built from the same constants as the DTOs (`OrderStatus`, `MAX_LIMIT`,
+`DEFAULT_LIMIT`), so a bad argument is rejected at the MCP boundary before it reaches RabbitMQ. Domain
+rejections come back as tool errors that keep the original status code, which is what lets a model
+correct itself instead of retrying blindly:
+
+```
+update_order rejected with 409 CONFLICT: Order is already SHIPPED
+```
+
+The destructive/read-only annotations are hints for the client, not enforcement — a client is free to
+ignore them, which is the other reason `MCP_ALLOW_WRITES` exists.
+
+### Why it is stateless
+
+The transport runs with `sessionIdGenerator: undefined` and `enableJsonResponse: true`: every `POST`
+gets a fresh `McpServer`, answers, and closes. There is no session map to leak and no server-initiated
+SSE stream, which is all a CRUD tool surface needs; `GET` and `DELETE /mcp` answer `405`. Session mode
+is worth adding back only when a tool needs to stream progress back to the client.
+
+### Talking to it
+
+```ts
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+
+const transport = new StreamableHTTPClientTransport(new URL('http://localhost:3004/mcp'), {
+  requestInit: { headers: { Authorization: `Bearer ${process.env.MCP_AUTH_TOKEN}` } },
+});
+
+const client = new Client({ name: 'my-agent', version: '1.0.0' });
+await client.connect(transport);
+
+const { tools } = await client.listTools();
+const result = await client.callTool({
+  name: 'create_order',
+  arguments: { customerId: 'cust-1', items: [{ sku: 'SKU-A', quantity: 2, unitCents: 500 }] },
+});
+```
+
 ## Error handling
 
 order-service throws `RpcException` carrying `{ statusCode, message, error }`. A global filter in the
@@ -123,11 +187,13 @@ another's internals fails lint.
 | Variable | Used by | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | order-service, prisma CLI | Postgres connection string |
-| `RABBITMQ_URL` | all three | Broker URL |
-| `ORDER_QUEUE` | gateway, order-service | Queue for order RPC |
+| `RABBITMQ_URL` | all four | Broker URL |
+| `ORDER_QUEUE` | gateway, mcp-server, order-service | Queue for order RPC |
 | `NOTIFICATIONS_QUEUE` | order-service, notification-service | Queue for order events |
-| `API_GATEWAY_PORT` / `ORDER_SERVICE_PORT` / `NOTIFICATION_SERVICE_PORT` | respective service | HTTP port |
-| `RPC_TIMEOUT_MS` | gateway | How long to wait for order-service |
+| `API_GATEWAY_PORT` / `ORDER_SERVICE_PORT` / `NOTIFICATION_SERVICE_PORT` / `MCP_SERVER_PORT` | respective service | HTTP port |
+| `RPC_TIMEOUT_MS` | gateway, mcp-server | How long to wait for order-service |
+| `MCP_AUTH_TOKEN` | mcp-server | Bearer token required on `/mcp`, at least 24 characters |
+| `MCP_ALLOW_WRITES` | mcp-server | `false` registers only the read-only tools |
 
 Each service validates its own variables at boot with `class-validator` and refuses to start if any
 are missing or malformed.
@@ -141,7 +207,15 @@ are missing or malformed.
   those be inspected.
 - **`emit` to a dedicated queue is point-to-point, not topic fan-out.** This is the idiomatic Nest
   RMQ approach; a second independent consumer would need a topic exchange.
-- **No authentication or rate limiting** on the gateway.
+- **No authentication or rate limiting** on the gateway. `mcp-server` requires a bearer token but has no
+  rate limiting either, and the token in `.env.example` and `docker-compose.yml` is a development
+  placeholder — replace it before exposing the port anywhere.
+- **The MCP server has no per-caller scopes.** `MCP_ALLOW_WRITES` is process-wide, so read-only and
+  read-write access means two deployments rather than two tokens. Per-caller scopes belong with real
+  OAuth, which is out of scope here.
+- **No DNS-rebinding protection on `/mcp`.** Mandatory bearer auth makes it a non-issue for a rebinding
+  attacker, who cannot read the token, but a browser-facing deployment should still sit behind a proxy
+  that pins `Host` and `Origin`.
 - **Runtime images install from the generated `package.json`** rather than a pruned lockfile, because
   Nx's `prune-lockfile` executor expects a per-app `package.json` this layout does not use. Direct
   dependencies are exact-pinned; transitive ones can drift between builds.
